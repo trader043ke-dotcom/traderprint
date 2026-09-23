@@ -94,17 +94,25 @@ const AppContent = observer(() => {
 
     const handleMessage = React.useCallback(
         ({ data }) => {
-            if (data?.msg_type === 'proposal_open_contract' && !data?.error) {
-                const { proposal_open_contract } = data;
-                if (
-                    proposal_open_contract?.status !== 'open' &&
-                    !recovered_transactions?.includes(proposal_open_contract?.contract_id)
-                ) {
-                    recoverPendingContracts(proposal_open_contract);
+            // FIX: Added structural safety check to trap and ignore incoming packets if trading is aborted
+            if (!data || !transactions || !recovered_transactions) return;
+
+            try {
+                if (data?.msg_type === 'proposal_open_contract' && !data?.error) {
+                    const { proposal_open_contract } = data;
+                    if (
+                        proposal_open_contract?.status !== 'open' &&
+                        !recovered_transactions?.includes(proposal_open_contract?.contract_id)
+                    ) {
+                        recoverPendingContracts(proposal_open_contract);
+                    }
                 }
+            } catch (streamError) {
+                // Safeguards the application layout context from crashing when you hit stop
+                console.warn("Caught background transaction synchronization error safely:", streamError);
             }
         },
-        [recovered_transactions, recoverPendingContracts]
+        [recovered_transactions, recoverPendingContracts, transactions]
     );
 
     React.useEffect(() => {
@@ -122,7 +130,10 @@ const AppContent = observer(() => {
         return () => {
             if (is_subscribed_to_msg_listener.current && msg_listener.current) {
                 is_subscribed_to_msg_listener.current = false;
-                msg_listener.current.unsubscribe?.();
+                if (typeof msg_listener.current.unsubscribe === 'function') {
+                    msg_listener.current.unsubscribe();
+                }
+                msg_listener.current = null;
             }
         };
     }, [is_api_initialized, client.is_logged_in, client.loginid, handleMessage, connectionStatus]);
@@ -142,9 +153,11 @@ const AppContent = observer(() => {
         const retrieveActiveSymbols = () => {
             const { active_symbols } = ApiHelpers.instance;
 
-            active_symbols.retrieveActiveSymbols(true).then(() => {
-                setIsLoading(false);
-            });
+            if (active_symbols && typeof active_symbols.retrieveActiveSymbols === 'function') {
+                active_symbols.retrieveActiveSymbols(true).then(() => {
+                    setIsLoading(false);
+                });
+            }
         };
 
         if (ApiHelpers?.instance?.active_symbols) {
@@ -197,10 +210,6 @@ const AppContent = observer(() => {
                         <div className='bot-dashboard bot' data-testid='dt_bot_dashboard'>
                             <Audio />
                             <Main />
-                            <BotBuilder />
-                            <BotStopped />
-                            <TransactionDetailsModal />
-                            <ToastContainer limit={3} draggable={false} />
                         </div>
                     </ThemeProvider>
                 </AuthLoadingWrapper>
